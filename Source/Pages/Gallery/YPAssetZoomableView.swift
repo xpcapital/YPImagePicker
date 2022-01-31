@@ -295,7 +295,7 @@ extension YPAssetZoomableView: UIScrollViewDelegate {
                 fitImage(false, animated: true)
             }
         }
-        myDelegate?.ypAssetZoomableViewScrollViewDidEndZooming()
+        zoomableViewDelegate?.ypAssetZoomableViewScrollViewDidEndZooming()
         cropAreaDidChange()
     }
     
