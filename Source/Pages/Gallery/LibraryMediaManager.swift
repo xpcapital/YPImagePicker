@@ -8,6 +8,8 @@
 
 import UIKit
 import Photos
+import Foundation
+import AVFoundation
 
 class LibraryMediaManager {
     
@@ -91,83 +93,56 @@ class LibraryMediaManager {
         let videosOptions = PHVideoRequestOptions()
         videosOptions.isNetworkAccessAllowed = true
         videosOptions.deliveryMode = .highQualityFormat
-        imageManager?.requestAVAsset(forVideo: videoAsset, options: videosOptions) { asset, _, _ in
+        imageManager?.requestAVAsset(forVideo: videoAsset, options: videosOptions) { [self] asset, _, _ in
             do {
-                guard let asset = asset else { ypLog("Don't have the asset"); return }
-                
-                let assetComposition = AVMutableComposition()
-                let assetMaxDuration = self.getMaxVideoDuration(between: duration, andAssetDuration: asset.duration)
-                let trackTimeRange = CMTimeRangeMake(start: CMTime.zero, duration: assetMaxDuration)
-                
-                // 1. Inserting audio and video tracks in composition
-                
-                guard let videoTrack = asset.tracks(withMediaType: AVMediaType.video).first,
-                      let videoCompositionTrack = assetComposition
-                        .addMutableTrack(withMediaType: .video,
-                                         preferredTrackID: kCMPersistentTrackID_Invalid) else {
-                    ypLog("Problems with video track")
-                    return
 
-                }
-                if let audioTrack = asset.tracks(withMediaType: AVMediaType.audio).first,
-                   let audioCompositionTrack = assetComposition
-                    .addMutableTrack(withMediaType: AVMediaType.audio,
-                                     preferredTrackID: kCMPersistentTrackID_Invalid) {
-                    try audioCompositionTrack.insertTimeRange(trackTimeRange, of: audioTrack, at: CMTime.zero)
-                }
+                let videoTrack = asset!.tracks(withMediaType: .video).first!
                 
-                try videoCompositionTrack.insertTimeRange(trackTimeRange, of: videoTrack, at: CMTime.zero)
+                let videoComposition = AVMutableVideoComposition()
+                videoComposition.renderSize = cropRect.size
+                videoComposition.frameDuration = CMTime(value: 1, timescale: 30)
                 
-                // Layer Instructions
-                let layerInstructions = AVMutableVideoCompositionLayerInstruction(assetTrack: videoCompositionTrack)
-                var transform = videoTrack.preferredTransform
-                let videoSize = videoTrack.naturalSize.applying(transform)
-                transform.tx = (videoSize.width < 0) ? abs(videoSize.width) : 0.0
-                transform.ty = (videoSize.height < 0) ? abs(videoSize.height) : 0.0
-                transform.tx -= cropRect.minX
-                transform.ty -= cropRect.minY
-                layerInstructions.setTransform(transform, at: CMTime.zero)
-                videoCompositionTrack.preferredTransform = transform
+                let instruction = AVMutableVideoCompositionInstruction()
+                instruction.timeRange = CMTimeRange(start: .zero, duration: CMTime(seconds: 60, preferredTimescale: 30))
                 
-                // CompositionInstruction
-                let mainInstructions = AVMutableVideoCompositionInstruction()
-                mainInstructions.timeRange = trackTimeRange
-                mainInstructions.layerInstructions = [layerInstructions]
+                let testTransform = self.getTransform(for: videoTrack, cropRect: cropRect)
+                let transformer = AVMutableVideoCompositionLayerInstruction(assetTrack: videoTrack)
                 
-                // Video Composition
-                let videoComposition = AVMutableVideoComposition(propertiesOf: asset)
-                videoComposition.instructions = [mainInstructions]
-                videoComposition.renderSize = cropRect.size // needed?
-                
-                // 5. Configuring export session
+                transformer.setTransform(testTransform, at: .zero)
+                instruction.layerInstructions = [transformer]
+                videoComposition.instructions = [instruction]
                 
                 let fileURL = URL(fileURLWithPath: NSTemporaryDirectory())
                     .appendingUniquePathComponent(pathExtension: YPConfig.video.fileType.fileExtension)
-                let exportSession = assetComposition
-                    .export(to: fileURL,
-                            videoComposition: videoComposition,
-                            removeOldFile: true) { [weak self] session in
-                        DispatchQueue.main.async {
-                            switch session.status {
-                            case .completed:
-                                if let url = session.outputURL {
-                                    if let index = self?.currentExportSessions.firstIndex(of: session) {
-                                        self?.currentExportSessions.remove(at: index)
-                                    }
-                                    callback(url)
-                                } else {
-                                    ypLog("Don't have URL.")
-                                    callback(nil)
+                let exportSession = AVAssetExportSession(asset: asset!, presetName: AVAssetExportPresetHighestQuality)
+                exportSession?.videoComposition = videoComposition
+                exportSession?.outputURL = fileURL
+                exportSession?.outputFileType = AVFileType.mp4
+
+                exportSession?.exportAsynchronously(completionHandler: {
+                    
+                    DispatchQueue.main.async {
+                        switch exportSession?.status {
+                        case .completed:
+                            if let url = exportSession?.outputURL {
+                                if let exportSession = exportSession,
+                                   let index = self.currentExportSessions.firstIndex(of: exportSession) {
+                                    self.currentExportSessions.remove(at: index)
                                 }
-                            case .failed:
-                                ypLog("Export of the video failed : \(String(describing: session.error))")
-                                callback(nil)
-                            default:
-                                ypLog("Export session completed with \(session.status) status. Not handled.")
+                                callback(url)
+                            } else {
+                                ypLog("Don't have URL.")
                                 callback(nil)
                             }
+                        case .failed:
+                            ypLog("Export of the video failed : \(String(describing: exportSession?.error))")
+                            callback(nil)
+                        default:
+                            ypLog("Export session completed with \(exportSession?.status ?? .unknown) status. Not handled.")
+                            callback(nil)
                         }
                     }
+                })
 
                 // 6. Exporting
                 DispatchQueue.main.async {
@@ -177,7 +152,7 @@ class LibraryMediaManager {
                                                             userInfo: exportSession,
                                                             repeats: true)
                 }
-
+//
                 if let s = exportSession {
                     self.currentExportSessions.append(s)
                 }
@@ -185,6 +160,36 @@ class LibraryMediaManager {
                 ypLog("Error: \(error)")
             }
         }
+    }
+    
+    private func getTransform(for videoTrack: AVAssetTrack, cropRect: CGRect) -> CGAffineTransform {
+        
+        let renderScale: CGFloat = 1 //renderSize.width / cropFrame.width // TO DEFINE
+        let offset = CGPoint(x: -cropRect.origin.x, y: -cropRect.origin.y)
+        let rotation = atan2(videoTrack.preferredTransform.b, videoTrack.preferredTransform.a)
+
+        var rotationOffset = CGPoint(x: 0, y: 0)
+
+        if videoTrack.preferredTransform.b == -1.0 {
+            rotationOffset.y = videoTrack.naturalSize.width
+        } else if videoTrack.preferredTransform.c == -1.0 {
+            rotationOffset.x = videoTrack.naturalSize.height
+        } else if videoTrack.preferredTransform.a == -1.0 {
+            rotationOffset.x = videoTrack.naturalSize.width
+            rotationOffset.y = videoTrack.naturalSize.height
+        }
+
+        var transform = CGAffineTransform.identity
+        transform = transform.scaledBy(x: renderScale, y: renderScale)
+        transform = transform.translatedBy(x: offset.x + rotationOffset.x, y: offset.y + rotationOffset.y)
+        transform = transform.rotated(by: rotation)
+
+        print("track size \(videoTrack.naturalSize)")
+        print("preferred Transform = \(videoTrack.preferredTransform)")
+        print("rotation angle \(rotation)")
+        print("rotation offset \(rotationOffset)")
+        print("actual Transform = \(transform)")
+        return transform
     }
     
     private func getMaxVideoDuration(between duration: CMTime?, andAssetDuration assetDuration: CMTime) -> CMTime {
@@ -229,5 +234,13 @@ class LibraryMediaManager {
             return nil
         }
         return fetchResult.object(at: index)
+    }
+    
+    public func radians<T: FloatingPoint>(_ degrees: T) -> T {
+        return .pi * degrees / 180
+    }
+
+    public func degrees<T: FloatingPoint>(radians: T) -> T {
+        return radians * 180 / .pi
     }
 }
