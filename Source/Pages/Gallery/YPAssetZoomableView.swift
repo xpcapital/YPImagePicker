@@ -227,6 +227,9 @@ fileprivate extension YPAssetZoomableView {
         // Setting new scale
         minimumZoomScale = zoomScale
         self.zoomScale = zoomScale
+        
+        // Setting the frame to get it fitting after selecting
+        fitImage(false)
     }
     
     /// Calculate zoom scale which will fit the image to square
