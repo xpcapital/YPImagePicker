@@ -215,6 +215,12 @@ public struct YPConfigLibrary {
 
     /// Set the number of items per row in collection view. Defaults to 4.
     public var numberOfItemsInRow: Int = 4
+    
+    /// Show/hide vertical scroll indicator for scrollview. Defaults to false.
+    public var showVerticalScrollIndicator: Bool = false
+    
+    /// Set the scrollview contentInset, useful if the picker is inside another view.
+    public var contentInset: UIEdgeInsets = .zero
 
     /// Set the spacing between items in collection view. Defaults to 1.0.
     public var spacingBetweenItems: CGFloat = 1.0

@@ -23,6 +23,8 @@ internal final class YPLibraryView: UIView {
         v.backgroundColor = YPConfig.colors.libraryScreenBackgroundColor
         v.collectionViewLayout = layout
         v.showsHorizontalScrollIndicator = false
+        v.showsVerticalScrollIndicator = YPConfig.library.showVerticalScrollIndicator
+        v.contentInset = YPConfig.library.contentInset
         v.alwaysBounceVertical = true
         return v
     }()
