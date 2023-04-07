@@ -10,6 +10,7 @@ import UIKit
 import Photos
 
 extension YPLibraryVC: PHPhotoLibraryChangeObserver {
+
     func registerForLibraryChanges() {
         PHPhotoLibrary.shared().register(self)
     }
@@ -70,6 +71,12 @@ extension YPLibraryVC: PHPhotoLibraryChangeObserver {
             self.v.assetZoomableView.clearAsset()
             self.selectedItems.removeAll()
             self.delegate?.libraryViewFinishedLoading()
+        }
+
+        /** Here when the results of pictures have changed, we reset the selecteditems */
+        if mediaManager.hasResultItems {
+            selectedItems.removeAll()
+            self.changeAsset(self.mediaManager.getAsset(at: 0))
         }
     }
 }
